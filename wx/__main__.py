@@ -13,6 +13,7 @@ import argparse
 import concurrent.futures as cf
 import datetime as dt
 import json
+import os
 import sys
 import time
 
@@ -150,6 +151,10 @@ def main():
     ap.add_argument("--max-steps", type=int, default=0, help="testing: only the first N hours")
     ap.add_argument("--force", action="store_true", help="rebuild even if latest.json already has this run")
     a = ap.parse_args()
+    if not a.local and not all(os.environ.get(k) for k in ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY")):
+        # before setup, don't fail (and email) every hour; once live, the site's Worker alarms on stale data
+        print("R2 secrets not set (Settings > Secrets and variables > Actions); nothing published")
+        return
     S = st.open_store(a.local)
     t0 = time.time()
     (run_hrrr if a.model == "hrrr" else run_ecmwf)(S, a)
