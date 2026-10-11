@@ -31,4 +31,12 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: twr-public
-        run: python -m wx ecmwf ${{ inputs.force && '--force' || '' }}
+          PYTHONFAULTHANDLER: "1"
+        # On failure, the last 40 log lines become a public annotation (run logs need a GitHub login to read).
+        run: |
+          set -o pipefail
+          python -m wx ecmwf ${{ inputs.force && '--force' || '' }} 2>&1 | tee run.log || {
+            code=$?
+            echo "::error title=ecmwf failed (exit $code)::$(tail -40 run.log | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')"
+            exit $code
+          }

@@ -14,6 +14,7 @@ from pyproj import Proj
 from scipy.ndimage import map_coordinates
 
 from . import fetch, grid
+from .gribs import LOCK
 
 BASE = "https://noaa-hrrr-bdp-pds.s3.amazonaws.com"
 NAME = "HRRR (NOAA, 3 km)"
@@ -54,14 +55,15 @@ def newest_runs(now: dt.datetime | None = None) -> tuple[dt.datetime, dt.datetim
 
 # ---- projection: Lambert conformal, read from each GRIB header; the pixel lookup is cached per grid
 def _proj(sample: bytes) -> dict:
-    h = eccodes.codes_new_from_message(sample)
-    g = lambda k: eccodes.codes_get(h, k)
-    assert g("jScansPositively") == 1 and g("iScansNegatively") == 0, "unexpected HRRR scan order"
-    p = dict(lat1=g("Latin1InDegrees"), lat2=g("Latin2InDegrees"), lad=g("LaDInDegrees"), lov=g("LoVInDegrees") - 360,
-             R=g("radius"), lon00=g("longitudeOfFirstGridPointInDegrees") - 360, lat00=g("latitudeOfFirstGridPointInDegrees"),
-             dx=g("DxInMetres"), dy=g("DyInMetres"), grid_rel=bool(g("uvRelativeToGrid")))
-    eccodes.codes_release(h)
-    return p
+    with LOCK:
+        h = eccodes.codes_new_from_message(sample)
+        g = lambda k: eccodes.codes_get(h, k)
+        assert g("jScansPositively") == 1 and g("iScansNegatively") == 0, "unexpected HRRR scan order"
+        p = dict(lat1=g("Latin1InDegrees"), lat2=g("Latin2InDegrees"), lad=g("LaDInDegrees"), lov=g("LoVInDegrees") - 360,
+                 R=g("radius"), lon00=g("longitudeOfFirstGridPointInDegrees") - 360, lat00=g("latitudeOfFirstGridPointInDegrees"),
+                 dx=g("DxInMetres"), dy=g("DyInMetres"), grid_rel=bool(g("uvRelativeToGrid")))
+        eccodes.codes_release(h)
+        return p
 
 
 @lru_cache(maxsize=4)
@@ -75,13 +77,14 @@ def _coords(width: int, key: tuple):
 
 
 def _values(msg: bytes) -> np.ndarray:
-    h = eccodes.codes_new_from_message(msg)
-    v = eccodes.codes_get_values(h).astype(np.float32)
-    nx, ny = eccodes.codes_get(h, "Nx"), eccodes.codes_get(h, "Ny")
-    if eccodes.codes_get(h, "bitmapPresent"):
-        v[v == eccodes.codes_get(h, "missingValue")] = np.nan
-    eccodes.codes_release(h)
-    return v.reshape(ny, nx)
+    with LOCK:
+        h = eccodes.codes_new_from_message(msg)
+        v = eccodes.codes_get_values(h).astype(np.float32)
+        nx, ny = eccodes.codes_get(h, "Nx"), eccodes.codes_get(h, "Ny")
+        if eccodes.codes_get(h, "bitmapPresent"):
+            v[v == eccodes.codes_get(h, "missingValue")] = np.nan
+        eccodes.codes_release(h)
+        return v.reshape(ny, nx)
 
 
 def step(run: dt.datetime, f: int, widths: list[int]) -> dict[int, dict[str, np.ndarray]]:

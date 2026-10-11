@@ -11,6 +11,7 @@ import numpy as np
 from scipy.ndimage import map_coordinates
 
 from . import fetch, grid
+from .gribs import LOCK
 
 BASE = "https://data.ecmwf.int/forecasts"
 NAME = "ECMWF IFS (European, 0.25°)"
@@ -39,15 +40,16 @@ def newest_run(now: dt.datetime | None = None) -> dt.datetime:
 
 
 def _values(msg: bytes):
-    h = eccodes.codes_new_from_message(msg)
-    g = lambda k: eccodes.codes_get(h, k)
-    v = eccodes.codes_get_values(h).astype(np.float32)
-    if g("bitmapPresent"):
-        v[v == g("missingValue")] = np.nan
-    meta = dict(ni=g("Ni"), nj=g("Nj"), lat0=g("latitudeOfFirstGridPointInDegrees"), lon0=g("longitudeOfFirstGridPointInDegrees"),
-                di=g("iDirectionIncrementInDegrees"), dj=g("jDirectionIncrementInDegrees"), jpos=g("jScansPositively"))
-    eccodes.codes_release(h)
-    return v.reshape(meta["nj"], meta["ni"]), meta
+    with LOCK:
+        h = eccodes.codes_new_from_message(msg)
+        g = lambda k: eccodes.codes_get(h, k)
+        v = eccodes.codes_get_values(h).astype(np.float32)
+        if g("bitmapPresent"):
+            v[v == g("missingValue")] = np.nan
+        meta = dict(ni=g("Ni"), nj=g("Nj"), lat0=g("latitudeOfFirstGridPointInDegrees"), lon0=g("longitudeOfFirstGridPointInDegrees"),
+                    di=g("iDirectionIncrementInDegrees"), dj=g("jDirectionIncrementInDegrees"), jpos=g("jScansPositively"))
+        eccodes.codes_release(h)
+        return v.reshape(meta["nj"], meta["ni"]), meta
 
 
 @lru_cache(maxsize=4)
