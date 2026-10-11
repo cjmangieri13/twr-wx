@@ -151,9 +151,10 @@ def main():
     ap.add_argument("--max-steps", type=int, default=0, help="testing: only the first N hours")
     ap.add_argument("--force", action="store_true", help="rebuild even if latest.json already has this run")
     a = ap.parse_args()
-    if not a.local and not all(os.environ.get(k) for k in ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY")):
+    missing = [k for k in ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY") if not os.environ.get(k)]
+    if not a.local and missing:
         # before setup, don't fail (and email) every hour; once live, the site's Worker alarms on stale data
-        print("R2 secrets not set (Settings > Secrets and variables > Actions); nothing published")
+        print(f"R2 secrets not visible to this job: {', '.join(missing)} (repo Settings > Secrets and variables > Actions > Repository secrets); nothing published")
         return
     S = st.open_store(a.local)
     t0 = time.time()
@@ -162,4 +163,22 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Exit without the interpreter's normal teardown: on GitHub's Ubuntu runners the native libraries
+    # bundled by the eccodes and pyproj wheels abort at shutdown ("double free or corruption", exit
+    # 134) even after a clean run. Everything is flushed first; nothing else needs the teardown.
+    try:
+        main()
+        code = 0
+    except SystemExit as e:
+        if isinstance(e.code, int) or e.code is None:
+            code = e.code or 0
+        else:
+            print(e.code, file=sys.stderr)
+            code = 1
+    except BaseException:
+        import traceback
+        traceback.print_exc()
+        code = 1
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)
